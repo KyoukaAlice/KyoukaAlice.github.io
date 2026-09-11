@@ -1,10 +1,74 @@
 [
   {
+    "id": "markdown-renderer",
+    "title": "用原生 JavaScript 写一个 Markdown 渲染器",
+    "date": "2026-09-08",
+    "category": "前端",
+    "excerpt": "不引入任何第三方库，用不到 100 行代码把 Markdown 变成 HTML，顺便聊聊为什么一定要先转义再解析。",
+    "content": "## 为什么要自己写\n\n第三方 Markdown 库动辄几十 KB，而我只需要标题、列表、代码块这几样。于是我用不到 100 行原生 JS 写了一个够用的版本。\n\n## 核心思路：先转义，再解析\n\n最容易踩的坑是 **XSS**。如果先把 `<script>` 当成 HTML 输出，再想转义就晚了。正确的顺序是：\n\n1. 把 `&`、`<`、`>` 转义成 HTML 实体\n2. 在**已转义**的文本上做 Markdown 语法替换\n3. 输出最终 HTML\n\n```js\nfunction escHtml(s) {\n  return String(s).replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\");\n}\n```\n\n## 按行扫描，而不是正则一把梭\n\n块级语法（标题、列表、引用、代码块）天然是逐行的，用一个循环加状态机，比堆一堆正则清晰得多：\n\n- `#` 开头 → 标题\n- `-` 或 `1.` 开头 → 列表，连续的行要合并进同一个列表容器\n- 三个反引号 → 进入代码块模式，内部内容原样保留\n- `>` 开头 → 引用\n- 其他 → 普通段落\n\n## 行内语法最后处理\n\n加粗、斜体、行内代码、链接这些只影响一行内部，放在块级解析之后统一处理即可。注意**图片语法要写在链接规则之前**，否则 `![alt](url)` 会被链接规则吃掉前缀。\n\n> 小经验：处理行内语法时用 `(^|[^*])` 这样的边界捕获，可以避免 `**加粗**` 被斜体规则误伤。\n\n整套下来零依赖，还顺便搞懂了 Markdown 的解析顺序。"
+  },
+  {
+    "id": "vue-component-lib",
+    "title": "我的第一个 Vue 组件库：从 0 到 1",
+    "date": "2026-08-22",
+    "category": "前端",
+    "excerpt": "从目录结构、按需引入到发布，记录我在做一个 Vue 组件库时踩过的坑。",
+    "content": "## 起因\n\n项目里到处复制粘贴弹窗代码，改一处要改十个文件。于是我打算把常用组件抽成一个库。\n\n## 目录结构\n\n```\npackages/\n  button/\n    src/Button.vue\n    index.js\n  modal/\n    src/Modal.vue\n    index.js\n  index.js\n```\n\n## 三个关键决定\n\n1. **样式跟着组件走**，不要做成全局 CSS，否则使用者无法按需引入\n2. **props 一律给默认值**，能少一个必填项就少一个\n3. **不引入任何 UI 框架**，只依赖 Vue 本身\n\n## 按需引入怎么做\n\n每个组件目录下放一个入口文件，挂上 `install` 方法：\n\n```js\nimport Button from \"./src/Button.vue\";\nButton.install = function (app) {\n  app.component(Button.name, Button);\n};\nexport default Button;\n```\n\n这样使用方就能自己挑选要引入的组件了。\n\n> 踩坑：`package.json` 里的 `main`、`module`、`exports` 指向不同的产物，配错就会出现「本地能跑、装到项目里报错」。\n\n下一步准备补单元测试和文档站点。"
+  },
+  {
+    "id": "python-crawler",
+    "title": "Python 爬虫入门：把公开数据采集下来",
+    "date": "2026-08-03",
+    "category": "Python",
+    "excerpt": "用 requests 加 BeautifulSoup 写一个守规矩的采集脚本，包含重试、退避与去重。",
+    "content": "## 先讲规矩\n\n动手前请确认三件事：\n\n- 目标站点的 `robots.txt` 是否允许采集\n- 有没有公开 API（有 API 就别爬页面）\n- 请求频率会不会给对方造成压力\n\n## 最小可用版本\n\n```python\nimport time\nimport requests\nfrom bs4 import BeautifulSoup\n\nHEADERS = {\"User-Agent\": \"Mozilla/5.0 (compatible; MyBot/1.0)\"}\n\ndef fetch(url, retry=3):\n    for i in range(retry):\n        try:\n            r = requests.get(url, headers=HEADERS, timeout=10)\n            r.raise_for_status()\n            return r.text\n        except requests.RequestException:\n            time.sleep(2 ** i)      # 指数退避\n    return None\n\nhtml = fetch(\"https://example.com/list\")\nsoup = BeautifulSoup(html, \"html.parser\")\nfor item in soup.select(\".item\"):\n    print(item.get_text(strip=True))\n```\n\n## 三个实用细节\n\n1. **指数退避**：失败后等 1 秒、2 秒、4 秒再重试，比死循环友好得多\n2. **显式声明 UA**：让对方知道你是谁，必要时留下联系方式\n3. **落库前去重**：给数据加唯一键，重复采集时做 upsert\n\n## 关于并发\n\n小规模采集用 `time.sleep(1)` 就够了。真要并发，先把并发数压在 3 到 5，再考虑 `asyncio` 配合 `aiohttp`。\n\n> 采到的数据只是原料，清洗和结构化才是真正花时间的部分。"
+  },
+  {
+    "id": "mysql-index",
+    "title": "MySQL 索引到底该怎么建？",
+    "date": "2026-07-15",
+    "category": "数据库",
+    "excerpt": "从最左前缀、覆盖索引到索引失效的常见场景，一次讲清楚。",
+    "content": "## 索引不是越多越好\n\n每个索引都要占磁盘，写入时还要维护。一张表的索引数量建议控制在 5 个以内。\n\n## 最左前缀原则\n\n联合索引 `(a, b, c)` 能命中 `a`、`a+b`、`a+b+c` 三种条件，但**单独查 b 或 c 用不上**。\n\n```sql\n-- 走索引\nSELECT * FROM orders WHERE user_id = 1 AND status = 'paid';\n-- 不走索引（跳过了最左列）\nSELECT * FROM orders WHERE status = 'paid';\n```\n\n## 覆盖索引能省一次回表\n\n如果查询的字段都在索引里，引擎就不必回主键索引再取一次数据：\n\n```sql\nALTER TABLE orders ADD INDEX idx_user_status (user_id, status);\n-- 完全命中上面的索引，无需回表\nSELECT user_id, status FROM orders WHERE user_id = 1;\n```\n\n## 常见的索引失效场景\n\n- 在索引列上做运算或套函数，例如 `WHERE DATE(created_at) = '2026-01-01'`\n- 隐式类型转换，字符串列用数字去查\n- `LIKE '%前缀'` 这种左模糊\n- `OR` 连接了未建索引的列\n\n> 排查利器：用 `EXPLAIN` 看 `type` 和 `key` 两列，`type` 出现 `ALL` 基本就是全表扫描。"
+  },
+  {
+    "id": "java-rate-limit",
+    "title": "Java 接口服务的限流实践",
+    "date": "2026-06-27",
+    "category": "后端",
+    "excerpt": "令牌桶、漏桶与滑动窗口，以及在真实项目里该怎么选、怎么落地。",
+    "content": "## 为什么要在应用层限流\n\n网关限流挡的是整体流量，但某个接口在调用第三方服务时，需要更细粒度的保护。应用层限流是最后一道闸门。\n\n## 选哪种算法\n\n- **固定窗口**：实现最简单，但窗口交界处可能出现双倍突刺\n- **滑动窗口**：按时间戳统计，曲线平滑，内存开销略大\n- **令牌桶**：匀速放令牌，桶里攒下的令牌允许短时突发，适合面向用户的查询接口\n- **漏桶**：恒定速率流出，适合保护下游服务\n\n## 落地要点\n\n1. 限流的 key 要选对：按用户 ID、按 IP，还是按接口\n2. 被限流时返回 `429`，并在响应头带上 `Retry-After`\n3. 阈值不要拍脑袋，先统计 P99 的 QPS 再定\n4. 一定要有降级：限流生效时给出友好提示，而不是白屏\n\n## 一个简化的令牌桶\n\n```java\npublic boolean tryAcquire() {\n    long now = System.currentTimeMillis();\n    refill(now);                  // 按时间差补令牌\n    if (tokens > 0) {\n        tokens--;\n        return true;\n    }\n    return false;\n}\n```\n\n> 限流不是为了拒绝用户，而是为了保证服务不被拖垮。降级方案比限流本身更重要。"
+  },
+  {
+    "id": "vscode-git-tips",
+    "title": "VS Code + Git 日常提效清单",
+    "date": "2026-06-05",
+    "category": "效率",
+    "excerpt": "十几个每天都在用的小技巧：编辑器快捷键与 Git 别名配置。",
+    "content": "## 编辑器里最常用的几个快捷键\n\n- `Ctrl + P`：按文件名跳转，比在侧边栏翻找快十倍\n- `Ctrl + Shift + F`：全局搜索，可以限定目录\n- `Alt + 上下方向键`：整行上下移动\n- `Ctrl + D`：选中下一个相同的词，批量改名神器\n- `Ctrl + Shift + K`：删除整行\n\n## 终端里的 Git 别名\n\n在 `~/.gitconfig` 里加上：\n\n```ini\n[alias]\n  st = status -sb\n  co = checkout\n  br = branch\n  lg = log --oneline --graph --decorate -20\n  undo = reset --soft HEAD~1\n```\n\n之后 `git st`、`git lg` 就能用了，少敲很多字。\n\n## 提交前必做\n\n1. `git diff --staged` 看看到底提交了什么\n2. 确认没有把密钥、依赖目录、大文件带进去\n3. 提交信息写清「做了什么」，而不是「修改」\n\n> 小习惯：每完成一个小功能就提交一次。提交粒度小，将来回滚时会感谢自己。"
+  },
+  {
+    "id": "git-cheatsheet",
+    "title": "Git 常用命令速查：覆盖 80% 日常场景",
+    "date": "2026-05-16",
+    "category": "教程",
+    "excerpt": "日常三件套、撤销操作、分支管理与救命的 reflog，一次备齐。",
+    "content": "## 日常三件套\n\n```bash\ngit status -sb            # 看改了哪些文件\ngit add -p                # 逐块选择要提交的改动\ngit commit -m \"feat: 新功能\"\n```\n\n## 撤销\n\n- 改了但还没 `add`：`git restore 文件名`\n- 已 `add` 但还没提交：`git restore --staged 文件名`\n- 提交信息写错：`git commit --amend`\n- 提交到了错的分支：`git reset --soft HEAD~1` 再切分支重新提交\n\n## 分支操作\n\n```bash\ngit switch -c feature/login     # 新建并切换\ngit switch main                 # 切回主分支\ngit branch -d feature/login     # 删除已合并的分支\n```\n\n## 救命的 reflog\n\n误删分支、误 reset 之后不要慌：\n\n```bash\ngit reflog\ngit reset --hard <找到的那次提交>\n```\n\n`reflog` 记录了 HEAD 的每一次移动，本地操作几乎都能找回来。\n\n> 唯一救不回来的是「没提交就删掉的文件」，所以勤提交永远是对的。"
+  },
+  {
+    "id": "write-tech-articles",
+    "title": "如何写出让人愿意读的技术文章",
+    "date": "2026-04-28",
+    "category": "随笔",
+    "excerpt": "先想清楚读者是谁，再谈结构、代码和踩坑记录怎么写。",
+    "content": "## 先想清楚读者是谁\n\n写给自己看和写给别人看是两回事。动笔前先问一句：读者看完要能**做成什么事**？\n\n## 三个让文章更好读的习惯\n\n1. **开头给结论**：先说要解决什么问题、适合谁看，再展开细节\n2. **多用小标题和列表**：一段超过五行，读者就会开始跳读\n3. **代码要能跑**：给最小可运行片段，而不是从项目里截两百行\n\n## 关于踩坑记录\n\n最有价值的内容往往不是成功路径，而是失败路径：\n\n- 报错信息原文是什么\n- 试过哪些方案、为什么不行\n- 最后是怎么定位到根因的\n\n这类内容搜索引擎也喜欢，因为别人正拿着同样的报错在搜。\n\n## 写完放一天再发\n\n第二天回看，你会发现一堆可以删的废话。删掉它们，文章会强很多。\n\n> 写作是思考的副产品。写不清楚，通常是因为还没想清楚。"
+  },
+  {
     "id": "welcome",
     "title": "从零搭建 GitHub Pages 个人主页",
     "date": "2025-06-18",
     "category": "前端",
     "excerpt": "不依赖任何框架，用一份 HTML 文件上线属于你自己的个人网站，附完整源码与踩坑记录。",
-    "content": "## 为什么选择 GitHub Pages\n\n免费、稳定、自带 HTTPS，只要把 HTML 文件推到仓库就能访问，非常适合个人主页。\n\n### 三步上线\n\n1. 新建仓库（名字建议用 `用户名.github.io`）\n2. 把 `index.html` 推到仓库根目录\n3. 仓库 **Settings → Pages** 中选择分支并保存\n\n> 小提示：在根目录放一个空的 `.nojekyll` 文件，可以跳过 Jekyll 处理。\n\n之后在本页面底部点「管理」登录，就能直接在线写文章了。"
+    "content": "## 为什么选择 GitHub Pages\n\n免费、稳定、自带 HTTPS，只要把 HTML 文件推到仓库就能访问，非常适合个人主页。\n\n### 三步上线\n\n1. 新建仓库（名字建议用 `用户名.github.io`）\n2. 把 `index.html` 推到仓库根目录\n3. 仓库 **Settings → Pages** 中选择分支并保存\n\n> 小提示：在根目录放一个空的 `.nojekyll` 文件，可以跳过 Jekyll 处理。\n\n```bash\npython -m http.server 8000\n```\n\n之后把文章写进仓库的 `posts.json` 并提交，页面就会自动展示。"
   }
 ]
