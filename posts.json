@@ -1,0 +1,10 @@
+[
+  {
+    "id": "welcome",
+    "title": "从零搭建 GitHub Pages 个人主页",
+    "date": "2025-06-18",
+    "category": "前端",
+    "excerpt": "不依赖任何框架，用一份 HTML 文件上线属于你自己的个人网站，附完整源码与踩坑记录。",
+    "content": "## 为什么选择 GitHub Pages\n\n免费、稳定、自带 HTTPS，只要把 HTML 文件推到仓库就能访问，非常适合个人主页。\n\n### 三步上线\n\n1. 新建仓库（名字建议用 `用户名.github.io`）\n2. 把 `index.html` 推到仓库根目录\n3. 仓库 **Settings → Pages** 中选择分支并保存\n\n> 小提示：在根目录放一个空的 `.nojekyll` 文件，可以跳过 Jekyll 处理。\n\n之后在本页面底部点「管理」登录，就能直接在线写文章了。"
+  }
+]
