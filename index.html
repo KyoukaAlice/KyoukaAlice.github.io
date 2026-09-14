@@ -346,6 +346,16 @@
     .posts-empty[hidden] { display: none; }
     .posts-loading { text-align: center; color: var(--text-3); }
     .posts-loading[hidden] { display: none; }
+    .posts-hint {
+      margin-top: 22px; padding: 14px 18px; border-radius: 12px; font-size: 13.5px;
+      color: var(--text-2); background: rgba(99, 102, 241, .08);
+      border: 1px dashed rgba(99, 102, 241, .35); line-height: 1.8; text-align: left;
+    }
+    .posts-hint[hidden] { display: none; }
+    .posts-hint code {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px;
+      background: rgba(99, 102, 241, .14); padding: 1px 6px; border-radius: 6px;
+    }
     .more-wrap { text-align: center; margin-top: 40px; }
     .more-wrap[hidden] { display: none; }
 
@@ -591,7 +601,20 @@
 
         <div class="projects-grid" id="projectsGrid">
           <!-- ✏️ 新增项目 = 复制一个 <article> 块；data-tags 写该项目技术栈（英文逗号分隔），筛选按钮会自动出现 -->
-          <article class="card project-card reveal" style="--d:0s" data-tags="HTML5 / CSS3,JavaScript">
+          <article class="card project-card reveal" style="--d:0s" data-tags="Python,PyTorch,Django,MySQL">
+            <div class="project-icon">🧱</div>
+            <h3>材料识别系统</h3>
+            <p>基于 ResNet50 迁移学习的建筑材料图像识别与管理系统（毕业设计）：9 类材料自动识别，配套 Django 后台，含材料档案、识别日志与错误反馈闭环。</p>
+            <div class="chips project-chips"></div>
+            <div class="project-links">
+              <a href="https://kyoukaalice.github.io/material-recognition-django/docs/index.html" target="_blank" rel="noopener">项目展示
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+              </a>
+              <a href="https://github.com/KyoukaAlice/material-recognition-django" target="_blank" rel="noopener">源码</a>
+            </div>
+          </article>
+
+          <article class="card project-card reveal" style="--d:.05s" data-tags="HTML5 / CSS3,JavaScript">
             <div class="project-icon">📝</div>
             <h3>轻量博客引擎</h3>
             <p>纯静态、零依赖的个人博客生成器，Markdown 写作，一条命令即可构建发布。</p>
@@ -674,6 +697,10 @@
         <div class="posts-grid" id="postsGrid"></div>
         <p class="posts-loading" id="postsLoading">正在加载文章…</p>
         <p class="posts-empty" id="postsEmpty" hidden>还没有文章，把文章写进仓库的 posts.json 并提交即可展示 ✍️</p>
+        <p class="posts-hint" id="localHint" hidden>
+          ⚠️ 直接双击打开本地文件时，浏览器不允许网页读取同目录的 <code>posts.json</code>，所以这里显示的是内置示例文章。<br>
+          想看真实文章，请用本地服务器预览：双击目录里的 <code>本地预览.cmd</code>，或在本目录执行 <code>python -m http.server 8000</code> 后访问 <code>http://localhost:8000</code>；也可以上传到 GitHub 后直接访问线上地址。
+        </p>
 
         <div class="more-wrap reveal" id="moreWrap" hidden>
           <button type="button" class="btn btn-ghost" id="viewAllBtn">查看全部文章</button>
@@ -1021,6 +1048,7 @@
       var postsGrid = $("#postsGrid");
       var postsLoading = $("#postsLoading");
       var postsEmpty = $("#postsEmpty");
+      var localHint = $("#localHint");
 
       /* ---------- 通用工具 ---------- */
       function escHtml(s) {
@@ -1074,13 +1102,18 @@
       }
 
       /* ---------- 读取文章 ---------- */
-      // 依次尝试：同目录 posts.json（GitHub Pages / 本地服务器）→ 仓库 raw 地址（file:// 本地预览时）
+      // ✏️ 本地双击打开 index.html 时的回退数据源，改成你自己的仓库地址
+      var REPO_RAW = "https://raw.githubusercontent.com/KyoukaAlice/KyoukaAlice.github.io/main/posts.json";
+
+      // 依次尝试：同目录 posts.json（本地服务器 / GitHub Pages）→ 仓库 raw 地址（file:// 双击打开时）
       function postsUrls() {
         var urls = ["posts.json?t=" + Date.now()];
-        var host = location.hostname;
-        if (/\.github\.io$/.test(host)) {
+        if (location.protocol === "file:") {
+          // 浏览器禁止 file:// 页面读取本地文件，因此改从仓库线上读取
+          urls.push(REPO_RAW + "?t=" + Date.now());
+        } else if (/\.github\.io$/.test(location.hostname)) {
           var segs = location.pathname.split("/").filter(Boolean);
-          var owner = host.replace(/\.github\.io$/, "");
+          var owner = location.hostname.replace(/\.github\.io$/, "");
           var repo = segs.length ? segs[0] : owner + ".github.io";
           urls.push("https://raw.githubusercontent.com/" + owner + "/" + repo + "/main/posts.json?t=" + Date.now());
         }
@@ -1089,6 +1122,7 @@
       function fetchPosts() {
         postsLoading.hidden = false;
         var urls = postsUrls();
+        var loaded = false;
         function tryNext(i) {
           if (i >= urls.length) { posts = DEFAULT_POSTS.slice(); return Promise.resolve(); }
           return fetch(urls[i], { cache: "no-store" })
@@ -1096,11 +1130,14 @@
             .then(function (arr) {
               if (!Array.isArray(arr)) throw new Error("格式错误");
               posts = arr;
+              loaded = true;
             })
             .catch(function () { return tryNext(i + 1); });
         }
         return tryNext(0).then(function () {
           postsLoading.hidden = true;
+          // 双击本地打开又读不到数据时，明确告诉用户原因和解决办法
+          if (!loaded && location.protocol === "file:" && localHint) localHint.hidden = false;
           renderPosts();
         });
       }
