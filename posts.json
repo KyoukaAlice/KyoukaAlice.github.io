@@ -1,82 +1,18 @@
 [
   {
+    "id": "djangoblog-inkwell",
+    "title": "DjangoBlog：用 Django 写一个带楼中楼评论的博客系统",
+    "date": "2026-09-18",
+    "category": "Django",
+    "excerpt": "评论才是博客的复杂度中心：三字段解决楼中楼、软删除保住楼层、AJAX 无刷新，以及把 N+1 写成回归测试。",
+    "content": "## 为什么又写一个博客系统\n\n市面上的博客模板不少，但真正麻烦的从来不是发文章，而是**评论**：楼中楼怎么存、删评论后楼层怎么不塌、怎么防刷屏、怎么做到无刷新。这个项目就是围绕这些问题做的。\n\n功能上包括：类 B 站的楼中楼评论、Markdown 写作与代码高亮、点赞收藏、站内通知、用户主页、全文搜索，以及一套支持深浅双主题的响应式界面。\n\n## 楼中楼：三个字段解决递归\n\n最核心的设计在评论模型上。常见做法是只存一个 `parent`，然后递归查询或递归拼装，深度一大就会出现 N+1。这里用了三个字段：\n\n- `parent`：直接父评论\n- `root`：所属楼层（顶层评论）\n- `depth`：层级，最深压平到 2，在 `Comment.save()` 里自动推导\n\n好处是**一次 SELECT 就能取回整棵评论树**，零递归查询；前端按 `root` 分组、按 `depth` 缩进即可。任意深度的回复都会被压平成两级展示，不会出现缩进套娃。\n\n## 评论为什么用软删除\n\n删评论如果用物理删除，会遇到两个问题：楼层号突然断了，以及楼中楼里的回复变成孤儿。所以这里用 `is_deleted` 软删除，删除后保留「该评论已删除」占位，**楼层号不塌、回复不丢**。权限上，评论作者本人和文章作者（楼主）都能删。\n\n## 无刷新：AJAX 加事件委托\n\n发评论、点赞、删除、切换排序、翻页都不刷新页面。做法是把评论区整体做成局部模板由服务端渲染，前端只替换容器内容。\n\n这里有个容易踩的坑：如果事件绑在按钮自己身上，容器一被替换，新按钮就全部失效。所以事件统一委托到容器上：\n\n```js\ndocument.querySelector('.comment-area').addEventListener('click', function (e) {\n  var btn = e.target.closest('[data-action]');\n  if (!btn) return;\n  // 根据 data-action 分发：like / reply / delete / sort / page\n});\n```\n\n同时所有功能都保留了原生表单回退，**禁用 JS 也能正常发评论**。\n\n## 把 N+1 写成回归测试\n\n列表页最初每渲染一条评论就查一次用户和点赞，首页要 29 次查询。用 `select_related`、`prefetch_related`、`Prefetch` 梳理之后降到 13 次，并且用 `assertNumQueries` 把查询次数固化进单元测试——以后再写出 N+1，测试会直接失败。\n\n```python\ndef test_home_query_count(self):\n    with self.assertNumQueries(13):\n        self.client.get(reverse('blog:index'))\n```\n\n## Markdown 渲染与安全\n\n正文用 Markdown 渲染加 Pygments 代码高亮，渲染完再经 **bleach 白名单**过滤，避免 `script`、`onerror` 这类注入。渲染本身比较耗时，所以结果会写回 `Post.rendered_content` 缓存，通过比较 `rendered_at` 与 `updated` 判断是否过期。\n\n其余安全细节：CSRF 全站开启、开放重定向校验、上传文件类型白名单、评论频率限制（同一用户 15 秒一条）、三档权限校验。\n\n## 其他值得一提的\n\n- **站内通知**：评论、回复、点赞、收藏、评论被赞五类，导航栏小红点，点击直达对应评论\n- **表情系统**：38 个表情，`[em:smile]` 形式的表情码，纯表情评论自动放大显示\n- **头像三级兜底**：上传图片、外链、用户名首字母色块，永远不会出现裂图\n- **界面**：一套 CSS 变量设计系统，浅色与深色一键切换并跟随系统偏好；阅读进度条、自动生成的目录并滚动高亮、图片灯箱；图标全部内联 SVG，**不依赖任何 CDN，断网也能正常显示**\n\n## 技术栈与运行\n\n- 后端：Python 3.9 与 Django 4.2\n- 数据库：MySQL（默认）/ SQLite，一个环境变量即可切换\n- 正文渲染：Markdown、Pygments、bleach\n- 图片处理：Pillow\n- 前端：原生 HTML / CSS / JS，无框架、无构建步骤\n\nWindows 下双击即可跑起来：\n\n```cmd\nsetup_env.bat sqlite demo   :: 建环境、装依赖、建表、生成表情、灌演示数据\nstart.bat sqlite            :: 启动服务\n:: 打开 http://127.0.0.1:8000\n```\n\n演示账号 `admin`、`alice`、`bob`，密码都是 `BlogDemo!2026`。项目自带 88 个单元测试。\n\n## 静态预览是怎么来的\n\nGitHub Pages 只能托管静态文件，跑不了 Django。为了让别人不装环境也能看到界面，我写了一个 `build_snapshot` 管理命令：把真实渲染出的 39 个页面导出成静态快照放进 `docs/`，再发布到 Pages。\n\n> 所以在线预览里的样式、排版、楼中楼都是真实渲染结果，但**登录、发文、点赞、评论这些需要服务端的操作不会生效**，完整功能请本地启动。\n\n在线预览：[kyoukaalice.github.io/django-inkwell-blog](https://kyoukaalice.github.io/django-inkwell-blog/index.html)\n\n## 小结\n\n这个项目让我最深的体会是：**评论系统才是博客的复杂度中心**。楼层、权限、软删除、无刷新、防刷屏，每一条单独看都不难，叠在一起就必须在数据模型阶段想清楚——三字段方案如果一开始没想到，后面补起来会很痛苦。\n\n项目已开源，仅供学习参考。"
+  },
+  {
     "id": "material-recognition",
     "title": "毕业设计：用 ResNet50 做一个建筑材料识别系统",
     "date": "2026-09-16",
     "category": "深度学习",
     "excerpt": "从 360 张样本训练 ResNet50，到 Django 配套管理系统：记录我在毕业设计里踩过的工程化问题。",
     "content": "## 项目背景\n\n毕业设计选题时，我想做一个「能真正跑起来」的东西，而不是只训练一个模型交报告。于是有了这个系统：面向施工现场的材料管理场景，拍照识别建筑材料，并自动关联材料档案。\n\n- 9 类常见建筑材料的自动识别\n- ResNet50 迁移学习作为骨干网络\n- 配套 Django 4.2 的 Web 管理系统\n\n## 数据集与训练\n\n数据集共 360 张样本，按 8 : 1 : 1 划分训练集、验证集与测试集。小样本想收敛，迁移学习几乎是必选项——直接加载 ImageNet 预训练权重开始微调：\n\n- 优化器 AdamW，学习率 `1e-3`，权重衰减 `1e-4`\n- 批量大小 16，训练 50 轮\n- 输入统一缩放到 256 后中心裁剪 `224×224`，再按 ImageNet 统计量归一化\n\nResNet50 约 25.6M 参数，在验证集上收敛稳定。铜管、玻璃棉这类外观相近的材料也能正确区分，这也是我最担心的部分。\n\n## 模型只是其中一环\n\n真正花时间的是把它变成能用的系统：\n\n1. **识别入口**：本地上传、浏览器摄像头实时拍摄、内置样例三种方式\n2. **材料档案**：9 类材料的简介、产地、库存集中维护，识别结果自动关联展示\n3. **日志审计**：按用户、材料名称、时间区间组合检索历史识别记录\n4. **错误反馈闭环**：用户可以标注正确类别，反馈与原识别结果关联保存，为后续迭代积累数据\n5. **权限体系**：管理员与普通用户两级权限，服务端强制校验，密码加密摘要存储\n6. **概率可视化**：用 Matplotlib 画出全部类别概率柱状图，支持导出 PNG 用于报告\n\n## 技术栈\n\n- 深度学习：PyTorch 2.2.2 与 torchvision 0.17.2\n- Web 框架：Django 4.2 LTS\n- 数据库：SQLite（开发）/ MySQL\n- 图像处理：Pillow；图表绘制：Matplotlib\n- 前端：原生 HTML / CSS / JS\n\n架构是典型的三层结构：表现层在浏览器，业务层是 Django 的路由、视图、表单与权限，算法层与数据层负责 ResNet50 推理、ORM 模型与文件存储。\n\n## 怎么跑起来\n\n```bash\ngit clone https://github.com/KyoukaAlice/material-recognition-django.git\ncd material-recognition-django\nrunserver.cmd   # Windows 下一键：建虚拟环境、装依赖、建表、导入数据\n# 浏览器访问 http://127.0.0.1:8000，默认账号 Admin / 123456\n```\n\n模型权重 `best_model.pth` 约 90 MB，没有放进 Git 仓库，需要从 Releases 页面下载后放到 `models/` 目录。\n\n> 注意：GitHub Pages 只能托管静态文件，跑不了 PyTorch 推理与 Django 服务，所以线上那个展示页只是文档说明，完整功能必须在本地启动。\n\n## 小结\n\n这个项目让我明白：**模型效果只是及格线，工程化才是交付线**。权限、日志、反馈闭环这些「不性感」的部分，恰恰决定了系统能不能真正被人用起来。\n\n项目已开源（MIT 协议），欢迎交流。"
-  },
-  {
-    "id": "markdown-renderer",
-    "title": "用原生 JavaScript 写一个 Markdown 渲染器",
-    "date": "2026-09-08",
-    "category": "前端",
-    "excerpt": "不引入任何第三方库，用不到 100 行代码把 Markdown 变成 HTML，顺便聊聊为什么一定要先转义再解析。",
-    "content": "## 为什么要自己写\n\n第三方 Markdown 库动辄几十 KB，而我只需要标题、列表、代码块这几样。于是我用不到 100 行原生 JS 写了一个够用的版本。\n\n## 核心思路：先转义，再解析\n\n最容易踩的坑是 **XSS**。如果先把 `<script>` 当成 HTML 输出，再想转义就晚了。正确的顺序是：\n\n1. 把 `&`、`<`、`>` 转义成 HTML 实体\n2. 在**已转义**的文本上做 Markdown 语法替换\n3. 输出最终 HTML\n\n```js\nfunction escHtml(s) {\n  return String(s).replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\");\n}\n```\n\n## 按行扫描，而不是正则一把梭\n\n块级语法（标题、列表、引用、代码块）天然是逐行的，用一个循环加状态机，比堆一堆正则清晰得多：\n\n- `#` 开头 → 标题\n- `-` 或 `1.` 开头 → 列表，连续的行要合并进同一个列表容器\n- 三个反引号 → 进入代码块模式，内部内容原样保留\n- `>` 开头 → 引用\n- 其他 → 普通段落\n\n## 行内语法最后处理\n\n加粗、斜体、行内代码、链接这些只影响一行内部，放在块级解析之后统一处理即可。注意**图片语法要写在链接规则之前**，否则 `![alt](url)` 会被链接规则吃掉前缀。\n\n> 小经验：处理行内语法时用 `(^|[^*])` 这样的边界捕获，可以避免 `**加粗**` 被斜体规则误伤。\n\n整套下来零依赖，还顺便搞懂了 Markdown 的解析顺序。"
-  },
-  {
-    "id": "vue-component-lib",
-    "title": "我的第一个 Vue 组件库：从 0 到 1",
-    "date": "2026-08-22",
-    "category": "前端",
-    "excerpt": "从目录结构、按需引入到发布，记录我在做一个 Vue 组件库时踩过的坑。",
-    "content": "## 起因\n\n项目里到处复制粘贴弹窗代码，改一处要改十个文件。于是我打算把常用组件抽成一个库。\n\n## 目录结构\n\n```\npackages/\n  button/\n    src/Button.vue\n    index.js\n  modal/\n    src/Modal.vue\n    index.js\n  index.js\n```\n\n## 三个关键决定\n\n1. **样式跟着组件走**，不要做成全局 CSS，否则使用者无法按需引入\n2. **props 一律给默认值**，能少一个必填项就少一个\n3. **不引入任何 UI 框架**，只依赖 Vue 本身\n\n## 按需引入怎么做\n\n每个组件目录下放一个入口文件，挂上 `install` 方法：\n\n```js\nimport Button from \"./src/Button.vue\";\nButton.install = function (app) {\n  app.component(Button.name, Button);\n};\nexport default Button;\n```\n\n这样使用方就能自己挑选要引入的组件了。\n\n> 踩坑：`package.json` 里的 `main`、`module`、`exports` 指向不同的产物，配错就会出现「本地能跑、装到项目里报错」。\n\n下一步准备补单元测试和文档站点。"
-  },
-  {
-    "id": "python-crawler",
-    "title": "Python 爬虫入门：把公开数据采集下来",
-    "date": "2026-08-03",
-    "category": "Python",
-    "excerpt": "用 requests 加 BeautifulSoup 写一个守规矩的采集脚本，包含重试、退避与去重。",
-    "content": "## 先讲规矩\n\n动手前请确认三件事：\n\n- 目标站点的 `robots.txt` 是否允许采集\n- 有没有公开 API（有 API 就别爬页面）\n- 请求频率会不会给对方造成压力\n\n## 最小可用版本\n\n```python\nimport time\nimport requests\nfrom bs4 import BeautifulSoup\n\nHEADERS = {\"User-Agent\": \"Mozilla/5.0 (compatible; MyBot/1.0)\"}\n\ndef fetch(url, retry=3):\n    for i in range(retry):\n        try:\n            r = requests.get(url, headers=HEADERS, timeout=10)\n            r.raise_for_status()\n            return r.text\n        except requests.RequestException:\n            time.sleep(2 ** i)      # 指数退避\n    return None\n\nhtml = fetch(\"https://example.com/list\")\nsoup = BeautifulSoup(html, \"html.parser\")\nfor item in soup.select(\".item\"):\n    print(item.get_text(strip=True))\n```\n\n## 三个实用细节\n\n1. **指数退避**：失败后等 1 秒、2 秒、4 秒再重试，比死循环友好得多\n2. **显式声明 UA**：让对方知道你是谁，必要时留下联系方式\n3. **落库前去重**：给数据加唯一键，重复采集时做 upsert\n\n## 关于并发\n\n小规模采集用 `time.sleep(1)` 就够了。真要并发，先把并发数压在 3 到 5，再考虑 `asyncio` 配合 `aiohttp`。\n\n> 采到的数据只是原料，清洗和结构化才是真正花时间的部分。"
-  },
-  {
-    "id": "mysql-index",
-    "title": "MySQL 索引到底该怎么建？",
-    "date": "2026-07-15",
-    "category": "数据库",
-    "excerpt": "从最左前缀、覆盖索引到索引失效的常见场景，一次讲清楚。",
-    "content": "## 索引不是越多越好\n\n每个索引都要占磁盘，写入时还要维护。一张表的索引数量建议控制在 5 个以内。\n\n## 最左前缀原则\n\n联合索引 `(a, b, c)` 能命中 `a`、`a+b`、`a+b+c` 三种条件，但**单独查 b 或 c 用不上**。\n\n```sql\n-- 走索引\nSELECT * FROM orders WHERE user_id = 1 AND status = 'paid';\n-- 不走索引（跳过了最左列）\nSELECT * FROM orders WHERE status = 'paid';\n```\n\n## 覆盖索引能省一次回表\n\n如果查询的字段都在索引里，引擎就不必回主键索引再取一次数据：\n\n```sql\nALTER TABLE orders ADD INDEX idx_user_status (user_id, status);\n-- 完全命中上面的索引，无需回表\nSELECT user_id, status FROM orders WHERE user_id = 1;\n```\n\n## 常见的索引失效场景\n\n- 在索引列上做运算或套函数，例如 `WHERE DATE(created_at) = '2026-01-01'`\n- 隐式类型转换，字符串列用数字去查\n- `LIKE '%前缀'` 这种左模糊\n- `OR` 连接了未建索引的列\n\n> 排查利器：用 `EXPLAIN` 看 `type` 和 `key` 两列，`type` 出现 `ALL` 基本就是全表扫描。"
-  },
-  {
-    "id": "java-rate-limit",
-    "title": "Java 接口服务的限流实践",
-    "date": "2026-06-27",
-    "category": "后端",
-    "excerpt": "令牌桶、漏桶与滑动窗口，以及在真实项目里该怎么选、怎么落地。",
-    "content": "## 为什么要在应用层限流\n\n网关限流挡的是整体流量，但某个接口在调用第三方服务时，需要更细粒度的保护。应用层限流是最后一道闸门。\n\n## 选哪种算法\n\n- **固定窗口**：实现最简单，但窗口交界处可能出现双倍突刺\n- **滑动窗口**：按时间戳统计，曲线平滑，内存开销略大\n- **令牌桶**：匀速放令牌，桶里攒下的令牌允许短时突发，适合面向用户的查询接口\n- **漏桶**：恒定速率流出，适合保护下游服务\n\n## 落地要点\n\n1. 限流的 key 要选对：按用户 ID、按 IP，还是按接口\n2. 被限流时返回 `429`，并在响应头带上 `Retry-After`\n3. 阈值不要拍脑袋，先统计 P99 的 QPS 再定\n4. 一定要有降级：限流生效时给出友好提示，而不是白屏\n\n## 一个简化的令牌桶\n\n```java\npublic boolean tryAcquire() {\n    long now = System.currentTimeMillis();\n    refill(now);                  // 按时间差补令牌\n    if (tokens > 0) {\n        tokens--;\n        return true;\n    }\n    return false;\n}\n```\n\n> 限流不是为了拒绝用户，而是为了保证服务不被拖垮。降级方案比限流本身更重要。"
-  },
-  {
-    "id": "vscode-git-tips",
-    "title": "VS Code + Git 日常提效清单",
-    "date": "2026-06-05",
-    "category": "效率",
-    "excerpt": "十几个每天都在用的小技巧：编辑器快捷键与 Git 别名配置。",
-    "content": "## 编辑器里最常用的几个快捷键\n\n- `Ctrl + P`：按文件名跳转，比在侧边栏翻找快十倍\n- `Ctrl + Shift + F`：全局搜索，可以限定目录\n- `Alt + 上下方向键`：整行上下移动\n- `Ctrl + D`：选中下一个相同的词，批量改名神器\n- `Ctrl + Shift + K`：删除整行\n\n## 终端里的 Git 别名\n\n在 `~/.gitconfig` 里加上：\n\n```ini\n[alias]\n  st = status -sb\n  co = checkout\n  br = branch\n  lg = log --oneline --graph --decorate -20\n  undo = reset --soft HEAD~1\n```\n\n之后 `git st`、`git lg` 就能用了，少敲很多字。\n\n## 提交前必做\n\n1. `git diff --staged` 看看到底提交了什么\n2. 确认没有把密钥、依赖目录、大文件带进去\n3. 提交信息写清「做了什么」，而不是「修改」\n\n> 小习惯：每完成一个小功能就提交一次。提交粒度小，将来回滚时会感谢自己。"
-  },
-  {
-    "id": "git-cheatsheet",
-    "title": "Git 常用命令速查：覆盖 80% 日常场景",
-    "date": "2026-05-16",
-    "category": "教程",
-    "excerpt": "日常三件套、撤销操作、分支管理与救命的 reflog，一次备齐。",
-    "content": "## 日常三件套\n\n```bash\ngit status -sb            # 看改了哪些文件\ngit add -p                # 逐块选择要提交的改动\ngit commit -m \"feat: 新功能\"\n```\n\n## 撤销\n\n- 改了但还没 `add`：`git restore 文件名`\n- 已 `add` 但还没提交：`git restore --staged 文件名`\n- 提交信息写错：`git commit --amend`\n- 提交到了错的分支：`git reset --soft HEAD~1` 再切分支重新提交\n\n## 分支操作\n\n```bash\ngit switch -c feature/login     # 新建并切换\ngit switch main                 # 切回主分支\ngit branch -d feature/login     # 删除已合并的分支\n```\n\n## 救命的 reflog\n\n误删分支、误 reset 之后不要慌：\n\n```bash\ngit reflog\ngit reset --hard <找到的那次提交>\n```\n\n`reflog` 记录了 HEAD 的每一次移动，本地操作几乎都能找回来。\n\n> 唯一救不回来的是「没提交就删掉的文件」，所以勤提交永远是对的。"
-  },
-  {
-    "id": "write-tech-articles",
-    "title": "如何写出让人愿意读的技术文章",
-    "date": "2026-04-28",
-    "category": "随笔",
-    "excerpt": "先想清楚读者是谁，再谈结构、代码和踩坑记录怎么写。",
-    "content": "## 先想清楚读者是谁\n\n写给自己看和写给别人看是两回事。动笔前先问一句：读者看完要能**做成什么事**？\n\n## 三个让文章更好读的习惯\n\n1. **开头给结论**：先说要解决什么问题、适合谁看，再展开细节\n2. **多用小标题和列表**：一段超过五行，读者就会开始跳读\n3. **代码要能跑**：给最小可运行片段，而不是从项目里截两百行\n\n## 关于踩坑记录\n\n最有价值的内容往往不是成功路径，而是失败路径：\n\n- 报错信息原文是什么\n- 试过哪些方案、为什么不行\n- 最后是怎么定位到根因的\n\n这类内容搜索引擎也喜欢，因为别人正拿着同样的报错在搜。\n\n## 写完放一天再发\n\n第二天回看，你会发现一堆可以删的废话。删掉它们，文章会强很多。\n\n> 写作是思考的副产品。写不清楚，通常是因为还没想清楚。"
-  },
-  {
-    "id": "welcome",
-    "title": "从零搭建 GitHub Pages 个人主页",
-    "date": "2025-06-18",
-    "category": "前端",
-    "excerpt": "不依赖任何框架，用一份 HTML 文件上线属于你自己的个人网站，附完整源码与踩坑记录。",
-    "content": "## 为什么选择 GitHub Pages\n\n免费、稳定、自带 HTTPS，只要把 HTML 文件推到仓库就能访问，非常适合个人主页。\n\n### 三步上线\n\n1. 新建仓库（名字建议用 `用户名.github.io`）\n2. 把 `index.html` 推到仓库根目录\n3. 仓库 **Settings → Pages** 中选择分支并保存\n\n> 小提示：在根目录放一个空的 `.nojekyll` 文件，可以跳过 Jekyll 处理。\n\n```bash\npython -m http.server 8000\n```\n\n之后把文章写进仓库的 `posts.json` 并提交，页面就会自动展示。"
   }
 ]
